@@ -10,8 +10,6 @@ namespace SyntheticLife.Phi.World
 
         private float time = 0f;
         private Dictionary<Vector2, BackActionPatch> activeBackActions = new Dictionary<Vector2, BackActionPatch>();
-        private float[,] cachedField;
-        private bool fieldDirty = true;
 
         private struct BackActionPatch
         {
@@ -35,7 +33,6 @@ namespace SyntheticLife.Phi.World
         private void Update()
         {
             time += Time.deltaTime;
-            fieldDirty = true;
 
             // Clean up expired back actions
             var expired = new List<Vector2>();

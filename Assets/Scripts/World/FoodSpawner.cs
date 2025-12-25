@@ -49,9 +49,9 @@ namespace SyntheticLife.Phi.World
 
             // Check if position is valid (not too close to other food)
             bool valid = true;
-            foreach (var food in activeFood)
+            foreach (var existingFood in activeFood)
             {
-                if (food != null && Vector3.Distance(spawnPos, food.transform.position) < config.minSpawnDistance)
+                if (existingFood != null && Vector3.Distance(spawnPos, existingFood.transform.position) < config.minSpawnDistance)
                 {
                     valid = false;
                     break;
@@ -61,13 +61,13 @@ namespace SyntheticLife.Phi.World
             if (!valid) return;
 
             GameObject foodObj = Instantiate(config.foodPrefab, spawnPos, Quaternion.identity);
-            FoodItem food = foodObj.GetComponent<FoodItem>();
-            if (food != null)
+            FoodItem newFood = foodObj.GetComponent<FoodItem>();
+            if (newFood != null)
             {
                 float phi = phiField != null ? phiField.SamplePhi(spawnPos) : 0f;
                 float nutrientValue = config.baseNutrientValue * (1f + phi * config.phiNutrientMultiplier);
-                food.Initialize(nutrientValue, phi);
-                activeFood.Add(food);
+                newFood.Initialize(nutrientValue, phi);
+                activeFood.Add(newFood);
             }
         }
 

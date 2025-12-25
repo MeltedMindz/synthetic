@@ -27,8 +27,6 @@ namespace SyntheticLife.Phi.Core
 
         private CreatureDefaults defaults;
         private Genome genome;
-        private float lastNutritionUpdate = 0f;
-        private float lastStressUpdate = 0f;
 
         public void Initialize(CreatureDefaults config, Genome initialGenome)
         {
