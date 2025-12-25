@@ -2,6 +2,8 @@
 using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using Unity.MLAgents.Policies;
+using Unity.MLAgents.Sensors;
 using SyntheticLife.Phi.Config;
 using SyntheticLife.Phi.Core;
 using SyntheticLife.Phi.World;
@@ -153,13 +155,15 @@ namespace SyntheticLife.Phi.Editor
             pmSO.FindProperty("creatureDefaults").objectReferenceValue = creatureConfig;
             pmSO.ApplyModifiedProperties();
 
-            // Create creature prefab if needed
+            // Create creature prefab
             GameObject creaturePrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Creature.prefab");
             if (creaturePrefab == null)
             {
-                Debug.LogWarning("Creature prefab not found. Please create it manually following SETUP_GUIDE.md");
+                creaturePrefab = CreateCreaturePrefab(creatureConfig, rewardConfig, phiConfig, phiField, foodSpawner, pm, telemetryManager);
             }
-            else
+            
+            // Assign prefab to PopulationManager
+            if (creaturePrefab != null)
             {
                 SerializedObject pmPrefabSO = new SerializedObject(pm);
                 pmPrefabSO.FindProperty("creaturePrefab").objectReferenceValue = creaturePrefab;
@@ -180,17 +184,117 @@ namespace SyntheticLife.Phi.Editor
             }
             EditorSceneManager.SaveScene(scene, "Assets/Scenes/TrainingArena.unity");
 
-            Debug.Log("Scene setup complete! TelemetryManager and PopulationManager configured.");
+            Debug.Log("Scene setup complete! All components configured including Creature prefab.");
             EditorUtility.DisplayDialog("Scene Setup", 
                 "Training scene created!\n\n" +
                 "✅ TelemetryManager added and configured\n" +
-                "✅ PopulationManager configured with CreatureDefaults\n\n" +
-                "IMPORTANT: You still need to:\n" +
-                "1. Create Creature prefab with all components\n" +
-                "2. Assign configs to CreatureAgent (creatureConfig, rewardConfig, phiConfig)\n" +
-                "3. Configure Behavior Parameters\n" +
-                "4. Set up Ray Perception Sensor\n\n" +
-                "See SETUP_GUIDE.md for details.", "OK");
+                "✅ PopulationManager configured with CreatureDefaults\n" +
+                "✅ Creature prefab created and configured\n\n" +
+                "The scene is ready for training!\n" +
+                "You can start ML-Agents training now.", "OK");
+        }
+
+        static GameObject CreateCreaturePrefab(CreatureDefaults creatureConfig, RewardConfig rewardConfig, 
+            PhiFieldConfig phiConfig, PhiField phiField, FoodSpawner foodSpawner, PopulationManager popManager, 
+            TelemetryManager telemetryManager)
+        {
+            // Create Prefabs folder if needed
+            if (!AssetDatabase.IsValidFolder("Assets/Prefabs"))
+            {
+                AssetDatabase.CreateFolder("Assets", "Prefabs");
+            }
+
+            // Create Capsule GameObject
+            GameObject creature = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            creature.name = "Creature";
+            creature.transform.position = Vector3.zero;
+            creature.tag = "Creature";
+
+            // Setup Rigidbody
+            Rigidbody rb = creature.AddComponent<Rigidbody>();
+            rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+            rb.drag = 5f;
+
+            // Add GrowthSystem
+            GrowthSystem growthSystem = creature.AddComponent<GrowthSystem>();
+
+            // Add CreatureAgent
+            CreatureAgent agent = creature.AddComponent<CreatureAgent>();
+            SerializedObject agentSO = new SerializedObject(agent);
+            
+            // Assign references
+            agentSO.FindProperty("growthSystem").objectReferenceValue = growthSystem;
+            agentSO.FindProperty("rb").objectReferenceValue = rb;
+            agentSO.FindProperty("populationManager").objectReferenceValue = popManager;
+            agentSO.FindProperty("creatureConfig").objectReferenceValue = creatureConfig;
+            agentSO.FindProperty("rewardConfig").objectReferenceValue = rewardConfig;
+            agentSO.FindProperty("phiConfig").objectReferenceValue = phiConfig;
+            agentSO.FindProperty("phiField").objectReferenceValue = phiField;
+            agentSO.FindProperty("foodSpawner").objectReferenceValue = foodSpawner;
+            agentSO.FindProperty("moveSpeed").floatValue = 5f;
+            agentSO.FindProperty("turnSpeed").floatValue = 180f;
+            agentSO.ApplyModifiedProperties();
+
+            // Add Behavior Parameters (ML-Agents)
+            var behaviorParams = creature.AddComponent<BehaviorParameters>();
+            SerializedObject bpSO = new SerializedObject(behaviorParams);
+            bpSO.FindProperty("m_BehaviorName").stringValue = "Creature";
+            
+            // Vector Observation
+            var brainParams = bpSO.FindProperty("m_BrainParameters");
+            brainParams.FindPropertyRelative("m_VectorObservationSize").intValue = 17;
+            brainParams.FindPropertyRelative("m_NumStackedVectorObservations").intValue = 1;
+            
+            // Action Spec (Continuous: 2, Discrete: [2, 2])
+            var actionSpec = brainParams.FindPropertyRelative("m_ActionSpec");
+            actionSpec.FindPropertyRelative("NumContinuousActions").intValue = 2;
+            actionSpec.FindPropertyRelative("BranchSizes").arraySize = 2;
+            actionSpec.FindPropertyRelative("BranchSizes").GetArrayElementAtIndex(0).intValue = 2;
+            actionSpec.FindPropertyRelative("BranchSizes").GetArrayElementAtIndex(1).intValue = 2;
+            
+            bpSO.ApplyModifiedProperties();
+
+            // Add Ray Perception Sensor 3D
+            var raySensor = creature.AddComponent<RayPerceptionSensorComponent3D>();
+            SerializedObject raySO = new SerializedObject(raySensor);
+            raySO.FindProperty("m_SensorName").stringValue = "RayPerceptionSensor3D";
+            raySO.FindProperty("m_RaysPerDirection").intValue = 12;
+            raySO.FindProperty("m_MaxRayDegrees").floatValue = 90f;
+            raySO.FindProperty("m_SphereCastRadius").floatValue = 0.5f;
+            raySO.FindProperty("m_RayLength").floatValue = 10f;
+            raySO.FindProperty("m_RayLayerMask").intValue = -1; // All layers
+            raySO.FindProperty("m_DetectableTags").arraySize = 5;
+            raySO.FindProperty("m_DetectableTags").GetArrayElementAtIndex(0).stringValue = "Food";
+            raySO.FindProperty("m_DetectableTags").GetArrayElementAtIndex(1).stringValue = "Hazard";
+            raySO.FindProperty("m_DetectableTags").GetArrayElementAtIndex(2).stringValue = "Shelter";
+            raySO.FindProperty("m_DetectableTags").GetArrayElementAtIndex(3).stringValue = "Creature";
+            raySO.FindProperty("m_DetectableTags").GetArrayElementAtIndex(4).stringValue = "TemperatureZone";
+            raySO.ApplyModifiedProperties();
+
+            // Assign ray sensor to agent
+            agentSO.FindProperty("rayPerception").objectReferenceValue = raySensor;
+            agentSO.ApplyModifiedProperties();
+
+            // Set offspring prefab (self-reference after creating prefab)
+            // We'll do this after prefab creation
+
+            // Save as prefab
+            string prefabPath = "Assets/Prefabs/Creature.prefab";
+            GameObject prefab = PrefabUtility.SaveAsPrefabAsset(creature, prefabPath);
+            
+            // Now set offspring prefab reference
+            agentSO = new SerializedObject(agent);
+            agentSO.FindProperty("offspringPrefab").objectReferenceValue = prefab;
+            agentSO.ApplyModifiedProperties();
+            
+            // Apply changes back to prefab
+            PrefabUtility.ApplyPrefabInstance(creature, InteractionMode.AutomatedAction);
+            
+            // Clean up scene instance
+            DestroyImmediate(creature);
+
+            Debug.Log($"Creature prefab created at {prefabPath}");
+            return prefab;
         }
     }
 }
