@@ -50,9 +50,12 @@ mlagents-env\Scripts\activate
 # On macOS/Linux:
 source mlagents-env/bin/activate
 
-# Install ML-Agents
+# Install ML-Agents (matching Unity package version)
+pip install -U pip
 pip install mlagents
 ```
+
+**Note:** The Unity package uses ML-Agents 2.0.1. The Python package version should be compatible (latest stable works).
 
 ### 4. Verify Unity Project Setup
 
@@ -198,21 +201,37 @@ Go to: Edit → Project Settings → Tags and Layers
 
 ## Training
 
-### 1. Start Training
+### 1. Start Training Server
+
+**In a terminal:**
 
 ```bash
-# Activate your Python environment first
-source mlagents-env/bin/activate  # or mlagents-env\Scripts\activate on Windows
+# Navigate to project root
+cd /path/to/synthetic
 
-# Start training
+# Activate your Python environment
+source mlagents-env/bin/activate  # macOS/Linux
+# or
+mlagents-env\Scripts\activate      # Windows
+
+# Start training server (leave this running)
 mlagents-learn Config/ppo_life_v1.yaml --run-id life_v1 --train
 ```
 
+The server will wait for Unity to connect on port 5004.
+
 ### 2. Press Play in Unity
 
-- In Unity, press Play
-- The scene should connect to the Python trainer
-- Watch the console for connection messages
+- In Unity Editor, press **▶️ Play**
+- Unity will connect to the Python trainer automatically
+- Console message will change from "inference mode" to "Connected to trainer on port 5004"
+- Training will begin automatically
+
+### 3. Monitor Training
+
+- **Terminal**: Shows training progress, episode stats, rewards
+- **Unity Console**: Shows connection status, episode events
+- **TensorBoard**: `tensorboard --logdir results` (in another terminal)
 
 ### 3. Monitor Training
 
