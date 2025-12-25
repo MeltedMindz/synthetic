@@ -242,15 +242,30 @@ namespace SyntheticLife.Phi.Editor
             
             // Vector Observation
             var brainParams = bpSO.FindProperty("m_BrainParameters");
-            brainParams.FindPropertyRelative("m_VectorObservationSize").intValue = 17;
-            brainParams.FindPropertyRelative("m_NumStackedVectorObservations").intValue = 1;
-            
-            // Action Spec (Continuous: 2, Discrete: [2, 2])
-            var actionSpec = brainParams.FindPropertyRelative("m_ActionSpec");
-            actionSpec.FindPropertyRelative("NumContinuousActions").intValue = 2;
-            actionSpec.FindPropertyRelative("BranchSizes").arraySize = 2;
-            actionSpec.FindPropertyRelative("BranchSizes").GetArrayElementAtIndex(0).intValue = 2;
-            actionSpec.FindPropertyRelative("BranchSizes").GetArrayElementAtIndex(1).intValue = 2;
+            if (brainParams != null)
+            {
+                var vecObsSize = brainParams.FindPropertyRelative("m_VectorObservationSize");
+                if (vecObsSize != null) vecObsSize.intValue = 17;
+                
+                var stackedObs = brainParams.FindPropertyRelative("m_NumStackedVectorObservations");
+                if (stackedObs != null) stackedObs.intValue = 1;
+                
+                // Action Spec (Continuous: 2, Discrete: [2, 2])
+                var actionSpec = brainParams.FindPropertyRelative("m_ActionSpec");
+                if (actionSpec != null)
+                {
+                    var numContinuous = actionSpec.FindPropertyRelative("NumContinuousActions");
+                    if (numContinuous != null) numContinuous.intValue = 2;
+                    
+                    var branchSizes = actionSpec.FindPropertyRelative("BranchSizes");
+                    if (branchSizes != null)
+                    {
+                        branchSizes.arraySize = 2;
+                        branchSizes.GetArrayElementAtIndex(0).intValue = 2;
+                        branchSizes.GetArrayElementAtIndex(1).intValue = 2;
+                    }
+                }
+            }
             
             bpSO.ApplyModifiedProperties();
 
@@ -272,23 +287,31 @@ namespace SyntheticLife.Phi.Editor
             raySO.ApplyModifiedProperties();
 
             // Assign ray sensor to agent
-            agentSO.FindProperty("rayPerception").objectReferenceValue = raySensor;
-            agentSO.ApplyModifiedProperties();
+            var rayProp = agentSO.FindProperty("rayPerception");
+            if (rayProp != null)
+            {
+                rayProp.objectReferenceValue = raySensor;
+                agentSO.ApplyModifiedProperties();
+            }
 
-            // Set offspring prefab (self-reference after creating prefab)
-            // We'll do this after prefab creation
-
-            // Save as prefab
+            // Save as prefab first
             string prefabPath = "Assets/Prefabs/Creature.prefab";
             GameObject prefab = PrefabUtility.SaveAsPrefabAsset(creature, prefabPath);
             
-            // Now set offspring prefab reference
-            agentSO = new SerializedObject(agent);
-            agentSO.FindProperty("offspringPrefab").objectReferenceValue = prefab;
-            agentSO.ApplyModifiedProperties();
-            
-            // Apply changes back to prefab
-            PrefabUtility.ApplyPrefabInstance(creature, InteractionMode.AutomatedAction);
+            // Now set offspring prefab reference on the prefab asset
+            var prefabAgent = prefab.GetComponent<CreatureAgent>();
+            if (prefabAgent != null)
+            {
+                SerializedObject prefabAgentSO = new SerializedObject(prefabAgent);
+                var offspringProp = prefabAgentSO.FindProperty("offspringPrefab");
+                if (offspringProp != null)
+                {
+                    offspringProp.objectReferenceValue = prefab;
+                    prefabAgentSO.ApplyModifiedProperties();
+                    EditorUtility.SetDirty(prefab);
+                    AssetDatabase.SaveAssets();
+                }
+            }
             
             // Clean up scene instance
             DestroyImmediate(creature);
