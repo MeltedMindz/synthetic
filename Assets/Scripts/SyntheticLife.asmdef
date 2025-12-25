@@ -1,0 +1,20 @@
+{
+    "name": "SyntheticLife",
+    "rootNamespace": "SyntheticLife.Phi",
+    "references": [
+        "Unity.ML-Agents",
+        "Unity.ML-Agents.Extensions",
+        "Unity.Sensors",
+        "Unity.Inference"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
+
