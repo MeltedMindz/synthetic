@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using SyntheticLife.Phi.Config;
 
 namespace SyntheticLife.Phi.Core
 {
