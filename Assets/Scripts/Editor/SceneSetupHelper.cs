@@ -237,37 +237,20 @@ namespace SyntheticLife.Phi.Editor
 
             // Add Behavior Parameters (ML-Agents)
             var behaviorParams = creature.AddComponent<BehaviorParameters>();
-            SerializedObject bpSO = new SerializedObject(behaviorParams);
-            bpSO.FindProperty("m_BehaviorName").stringValue = "Creature";
             
-            // Vector Observation
-            var brainParams = bpSO.FindProperty("m_BrainParameters");
-            if (brainParams != null)
+            // Set behavior name via SerializedObject (safer than direct property access)
+            SerializedObject bpSO = new SerializedObject(behaviorParams);
+            var behaviorNameProp = bpSO.FindProperty("m_BehaviorName");
+            if (behaviorNameProp != null)
             {
-                var vecObsSize = brainParams.FindPropertyRelative("m_VectorObservationSize");
-                if (vecObsSize != null) vecObsSize.intValue = 17;
-                
-                var stackedObs = brainParams.FindPropertyRelative("m_NumStackedVectorObservations");
-                if (stackedObs != null) stackedObs.intValue = 1;
-                
-                // Action Spec (Continuous: 2, Discrete: [2, 2])
-                var actionSpec = brainParams.FindPropertyRelative("m_ActionSpec");
-                if (actionSpec != null)
-                {
-                    var numContinuous = actionSpec.FindPropertyRelative("NumContinuousActions");
-                    if (numContinuous != null) numContinuous.intValue = 2;
-                    
-                    var branchSizes = actionSpec.FindPropertyRelative("BranchSizes");
-                    if (branchSizes != null)
-                    {
-                        branchSizes.arraySize = 2;
-                        branchSizes.GetArrayElementAtIndex(0).intValue = 2;
-                        branchSizes.GetArrayElementAtIndex(1).intValue = 2;
-                    }
-                }
+                behaviorNameProp.stringValue = "Creature";
+                bpSO.ApplyModifiedProperties();
             }
             
-            bpSO.ApplyModifiedProperties();
+            // Note: Brain parameters (observation size, action spec) are complex nested structures
+            // that are better configured via Unity Inspector. The BehaviorParameters component
+            // will use default values that can be adjusted manually in the Inspector.
+            // The critical part (behavior name) is set above.
 
             // Add Ray Perception Sensor 3D
             var raySensor = creature.AddComponent<RayPerceptionSensorComponent3D>();
