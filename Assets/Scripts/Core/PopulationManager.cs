@@ -23,7 +23,7 @@ namespace SyntheticLife.Phi.Core
         {
             if (creaturePrefab == null)
             {
-                Debug.LogError("PopulationManager: No creature prefab assigned!");
+                Debug.LogWarning("PopulationManager: No creature prefab assigned! You need to create the Creature prefab and assign it here. See SETUP_GUIDE.md for instructions.");
             }
         }
 
