@@ -7,6 +7,7 @@ using System.Linq;
 using SyntheticLife.Phi.Core;
 using SyntheticLife.Phi.World;
 using SyntheticLife.Phi.Config;
+using SyntheticLife.Phi.Utils;
 
 namespace SyntheticLife.Phi.Core
 {
@@ -50,6 +51,8 @@ namespace SyntheticLife.Phi.Core
         public float antennaGain = 1f;
         private float lastPhiSense = 0f;
         private bool scannedLastStep = false;
+        private float phiUncertaintyBefore = 0.2f;
+        private float phiUncertaintyAfter = 0.2f;
 
         [Header("Metrics")]
         private float totalFoodEaten = 0f;
@@ -59,6 +62,17 @@ namespace SyntheticLife.Phi.Core
         private bool isInShelter = false;
         private bool isVulnerable = false;
         private float vulnerabilityEndTime = 0f;
+        private int agentId;
+        private int stepIndex = 0;
+        private int reproduceAttempts = 0;
+        private int reproduceSuccessCount = 0;
+        private int damageEvents = 0;
+        private float totalDamage = 0f;
+        private System.Random actionRNG;
+
+        [Header("Lineage")]
+        public int parentId = -1;
+        public int generation = 0;
 
         private float targetTemperature = 0.5f;
         private Vector3 startPosition;
@@ -79,7 +93,16 @@ namespace SyntheticLife.Phi.Core
             // Initialize genome if not set
             if (genome.baseEmax == 0)
             {
-                genome = creatureConfig.defaultGenome;
+                if (creatureConfig != null)
+                {
+                    genome = Genome.CreateDefault(creatureConfig);
+                }
+            }
+
+            // Clamp genome to valid ranges
+            if (creatureConfig != null)
+            {
+                genome = genome.Clamp(creatureConfig.genomeRanges);
             }
 
             // Initialize growth system
@@ -98,10 +121,19 @@ namespace SyntheticLife.Phi.Core
 
             startPosition = transform.position;
             targetTemperature = genome.tempTolerance;
+            antennaGain = genome.antennaGain;
+
+            // Initialize agent ID for telemetry
+            agentId = GetInstanceID();
+
+            // Initialize action RNG for exploration noise (seeded per episode)
+            actionRNG = new System.Random(agentId + (int)Time.time);
         }
 
         public override void OnEpisodeBegin()
         {
+            stepIndex = 0;
+
             // Reset state
             energy = creatureConfig != null ? creatureConfig.initialEnergy : 100f;
             temperature = creatureConfig != null ? creatureConfig.initialTemperature : 0.5f;
@@ -136,6 +168,28 @@ namespace SyntheticLife.Phi.Core
             episodeStartTime = Time.time;
             visitedCells.Clear();
             myOffspring.Clear();
+            reproduceAttempts = 0;
+            reproduceSuccessCount = 0;
+            damageEvents = 0;
+            totalDamage = 0f;
+
+            // Reset action RNG for this episode
+            actionRNG = new System.Random(agentId + (int)Time.time);
+
+            // Log episode start to telemetry
+            if (TelemetryManager.Instance != null && TelemetryManager.Instance.config != null && TelemetryManager.Instance.config.enableTelemetry)
+            {
+                TelemetryManager.Instance.LogEpisodeStart(agentId, stepIndex, genome);
+                TelemetryManager.Instance.LogEvent("BIRTH", agentId, stepIndex, new Dictionary<string, object>
+                {
+                    ["parentId"] = parentId,
+                    ["generation"] = generation,
+                    ["genome"] = genome,
+                    ["x"] = transform.position.x,
+                    ["y"] = transform.position.y,
+                    ["z"] = transform.position.z
+                });
+            }
 
             // Register with population manager
             if (populationManager != null)
@@ -222,11 +276,21 @@ namespace SyntheticLife.Phi.Core
         {
             if (creatureConfig == null || growthSystem == null) return;
 
+            stepIndex++;
             float deltaTime = Time.fixedDeltaTime;
 
             // Movement actions
             float moveForward = Mathf.Clamp(actions.ContinuousActions[0], -1f, 1f);
             float turn = Mathf.Clamp(actions.ContinuousActions[1], -1f, 1f);
+
+            // Add exploration noise based on instinct
+            if (genome.explorationNoiseBias > 0f && actionRNG != null)
+            {
+                float noiseForward = (float)(actionRNG.NextDouble() * 2.0 - 1.0) * genome.explorationNoiseBias;
+                float noiseTurn = (float)(actionRNG.NextDouble() * 2.0 - 1.0) * genome.explorationNoiseBias;
+                moveForward = Mathf.Clamp(moveForward + noiseForward, -1f, 1f);
+                turn = Mathf.Clamp(turn + noiseTurn, -1f, 1f);
+            }
 
             // Discrete actions
             bool scanAction = actions.DiscreteActions[0] == 1;
@@ -246,11 +310,36 @@ namespace SyntheticLife.Phi.Core
 
             // Scan action
             scannedLastStep = false;
+            phiUncertaintyBefore = GetPhiUncertainty();
             if (scanAction && energy > growthSystem.scanCostMultiplier)
             {
                 energy -= growthSystem.scanCostMultiplier;
                 scanCount++;
                 scannedLastStep = true;
+                phiUncertaintyAfter = GetPhiUncertainty();
+
+                // Curiosity reward for information gain (bounded)
+                if (genome.scanCuriosityBias > 0f)
+                {
+                    float uncertaintyReduction = phiUncertaintyBefore - phiUncertaintyAfter;
+                    if (uncertaintyReduction > 0f)
+                    {
+                        float curiosityReward = genome.scanCuriosityBias * uncertaintyReduction * 0.01f; // Tiny reward
+                        AddReward(curiosityReward);
+                    }
+                }
+
+                // Log scan event
+                if (TelemetryManager.Instance != null && TelemetryManager.Instance.config != null && TelemetryManager.Instance.config.enableTelemetry)
+                {
+                    TelemetryManager.Instance.LogEvent("SCAN", agentId, stepIndex, new Dictionary<string, object>
+                    {
+                        ["x"] = transform.position.x,
+                        ["y"] = transform.position.y,
+                        ["z"] = transform.position.z,
+                        ["phiSense"] = lastPhiSense
+                    });
+                }
 
                 // Trigger back action if enabled
                 if (phiField != null && phiConfig != null && phiConfig.enableBackAction)
@@ -258,11 +347,30 @@ namespace SyntheticLife.Phi.Core
                     phiField.TriggerBackAction(transform.position);
                 }
             }
+            else
+            {
+                phiUncertaintyAfter = GetPhiUncertainty();
+            }
 
             // Reproduction action
-            if (reproduceAction && CanReproduce())
+            if (reproduceAction)
             {
-                Reproduce();
+                if (CanReproduce())
+                {
+                    Reproduce();
+                }
+                else
+                {
+                    reproduceAttempts++;
+                    // Log failed attempt
+                    if (TelemetryManager.Instance != null && TelemetryManager.Instance.config != null && TelemetryManager.Instance.config.enableTelemetry)
+                    {
+                        TelemetryManager.Instance.LogEvent("REPRODUCE_ATTEMPT", agentId, stepIndex, new Dictionary<string, object>
+                        {
+                            ["success"] = false
+                        });
+                    }
+                }
             }
 
             // Update homeostasis
@@ -270,7 +378,19 @@ namespace SyntheticLife.Phi.Core
 
             // Update growth
             float ambientTemp = GetAmbientTemperature();
+            LifeStage oldStage = growthSystem.stage;
             growthSystem.UpdateGrowth(deltaTime, energy, integrity, ambientTemp, targetTemperature);
+
+            // Log stage change
+            if (growthSystem.stage != oldStage && TelemetryManager.Instance != null && TelemetryManager.Instance.config != null && TelemetryManager.Instance.config.enableTelemetry)
+            {
+                TelemetryManager.Instance.LogEvent("STAGE_CHANGE", agentId, stepIndex, new Dictionary<string, object>
+                {
+                    ["fromStage"] = oldStage,
+                    ["toStage"] = growthSystem.stage,
+                    ["age"] = growthSystem.age
+                });
+            }
 
             // Update cooldowns
             if (reproductionCooldown > 0f)
@@ -283,10 +403,37 @@ namespace SyntheticLife.Phi.Core
                 isVulnerable = false;
             }
 
+            // Update telemetry metrics
+            if (TelemetryManager.Instance != null && TelemetryManager.Instance.config != null && TelemetryManager.Instance.config.enableTelemetry)
+            {
+                TelemetryManager.Instance.UpdateEpisodeMetrics(agentId, energy, temperature, integrity);
+                TelemetryManager.Instance.LogTrajectory(agentId, stepIndex, transform.position, rb != null ? rb.velocity : Vector3.zero,
+                    energy, temperature, integrity, growthSystem.age, growthSystem.size, growthSystem.stage,
+                    lastPhiSense, scannedLastStep, reproduceAction);
+            }
+
             // Check for death
-            if (IsDead())
+            string causeOfDeath = "";
+            if (IsDead(out causeOfDeath))
             {
                 AddReward(rewardConfig != null ? rewardConfig.deathPenalty : -10f);
+
+                // Log death event
+                if (TelemetryManager.Instance != null && TelemetryManager.Instance.config != null && TelemetryManager.Instance.config.enableTelemetry)
+                {
+                    TelemetryManager.Instance.LogEvent("DEATH", agentId, stepIndex, new Dictionary<string, object>
+                    {
+                        ["cause"] = causeOfDeath,
+                        ["age"] = growthSystem.age,
+                        ["stage"] = growthSystem.stage,
+                        ["genome"] = genome,
+                        ["x"] = transform.position.x,
+                        ["y"] = transform.position.y,
+                        ["z"] = transform.position.z
+                    });
+                    TelemetryManager.Instance.LogEpisodeEnd(agentId, stepIndex, growthSystem.stage);
+                }
+
                 EndEpisode();
                 return;
             }
@@ -370,26 +517,38 @@ namespace SyntheticLife.Phi.Core
             if (rewardConfig == null || growthSystem == null) return;
 
             float maxEnergy = growthSystem.maxEnergy > 0 ? growthSystem.maxEnergy : 100f;
+            float energyNormalized = energy / maxEnergy;
 
             // Living reward (only if healthy)
-            if (energy / maxEnergy > rewardConfig.minEnergyForLivingReward &&
+            if (energyNormalized > rewardConfig.minEnergyForLivingReward &&
                 integrity > rewardConfig.minIntegrityForLivingReward)
             {
                 AddReward(rewardConfig.livingReward);
             }
 
-            // Starvation penalty
-            if (energy / maxEnergy < 0.2f)
+            // Starvation penalty - scaled by hungerUrgencyBias instinct
+            if (energyNormalized < 0.2f)
             {
-                AddReward(rewardConfig.starvationPenalty * deltaTime);
+                float penalty = rewardConfig.starvationPenalty * deltaTime * genome.hungerUrgencyBias;
+                AddReward(penalty);
             }
 
-            // Temperature stress penalty
+            // Temperature stress penalty - influenced by tempTolerance
             float tempStress = Mathf.Abs(temperature - targetTemperature);
             if (tempStress > 0.3f)
             {
-                AddReward(rewardConfig.temperatureStressPenalty * deltaTime);
+                float tempStressFactor = 1f / Mathf.Max(genome.tempTolerance, 0.1f);
+                float penalty = rewardConfig.temperatureStressPenalty * deltaTime * tempStressFactor;
+                AddReward(penalty);
             }
+        }
+
+        private float GetPhiUncertainty()
+        {
+            // Estimate uncertainty based on antenna gain and size
+            float baseUncertainty = 0.2f;
+            float uncertaintyReduction = (genome.antennaGain * growthSystem.size) * 0.1f;
+            return Mathf.Max(0.05f, baseUncertainty - uncertaintyReduction);
         }
 
         private void OnTriggerEnter(Collider other)
@@ -410,6 +569,18 @@ namespace SyntheticLife.Phi.Core
                 reward *= Mathf.Pow(rewardConfig != null ? rewardConfig.foodRewardDiminishingFactor : 0.8f, totalFoodEaten / 10f);
                 AddReward(reward);
 
+                // Log eat event
+                if (TelemetryManager.Instance != null && TelemetryManager.Instance.config != null && TelemetryManager.Instance.config.enableTelemetry)
+                {
+                    TelemetryManager.Instance.LogEvent("EAT", agentId, stepIndex, new Dictionary<string, object>
+                    {
+                        ["nutrients"] = nutrientValue,
+                        ["x"] = transform.position.x,
+                        ["y"] = transform.position.y,
+                        ["z"] = transform.position.z
+                    });
+                }
+
                 // Remove food
                 Destroy(food.gameObject);
                 if (foodSpawner != null)
@@ -429,8 +600,25 @@ namespace SyntheticLife.Phi.Core
             HazardZone hazard = other.GetComponent<HazardZone>();
             if (hazard != null)
             {
-                integrity -= hazard.GetDamageRate() * Time.fixedDeltaTime;
-                AddReward(rewardConfig != null ? rewardConfig.damagePenalty * Time.fixedDeltaTime : -0.05f);
+                float damage = hazard.GetDamageRate() * Time.fixedDeltaTime;
+                integrity -= damage;
+                totalDamage += damage;
+                damageEvents++;
+
+                // Damage penalty scaled by dangerAversionBias instinct
+                float penalty = rewardConfig != null ? rewardConfig.damagePenalty * Time.fixedDeltaTime : -0.05f;
+                penalty *= genome.dangerAversionBias;
+                AddReward(penalty);
+
+                // Log damage event
+                if (TelemetryManager.Instance != null && TelemetryManager.Instance.config != null && TelemetryManager.Instance.config.enableTelemetry)
+                {
+                    TelemetryManager.Instance.LogEvent("DAMAGE", agentId, stepIndex, new Dictionary<string, object>
+                    {
+                        ["damage"] = damage,
+                        ["source"] = "hazard"
+                    });
+                }
             }
         }
 
@@ -447,8 +635,13 @@ namespace SyntheticLife.Phi.Core
         {
             if (creatureConfig == null || growthSystem == null) return false;
 
+            // Apply reproductionConservatism - raises threshold
+            float baseThreshold = creatureConfig.reproductionEnergyThreshold;
+            float conservatismAdjustment = genome.reproductionConservatism * 0.2f; // Can raise threshold up to 20%
+            float effectiveThreshold = baseThreshold + conservatismAdjustment;
+
             return growthSystem.CanReproduce() &&
-                   energy >= growthSystem.maxEnergy * creatureConfig.reproductionEnergyThreshold &&
+                   energy >= growthSystem.maxEnergy * effectiveThreshold &&
                    integrity >= creatureConfig.reproductionIntegrityThreshold &&
                    reproductionCooldown <= 0f &&
                    !isVulnerable &&
@@ -477,19 +670,37 @@ namespace SyntheticLife.Phi.Core
 
             if (offspring != null)
             {
-                // Mutate genome
-                Genome childGenome = Genome.Mutate(
-                    genome,
-                    creatureConfig.mutationRate,
-                    creatureConfig.mutationStrength
-                );
+                // Mutate genome deterministically via PopulationManager
+                Genome childGenome = genome;
+                if (populationManager != null)
+                {
+                    childGenome = populationManager.MutateGenome(genome, agentId);
+                }
 
                 offspring.genome = childGenome;
+                offspring.parentId = agentId;
+                offspring.generation = generation + 1;
+                
+                // Initialize offspring with mutated genome
                 offspring.growthSystem.SetGenome(childGenome);
                 offspring.antennaGain = childGenome.antennaGain;
 
                 myOffspring.Add(offspring);
                 offspringCount++;
+                reproduceSuccessCount++;
+
+                // Log reproduction success
+                if (TelemetryManager.Instance != null && TelemetryManager.Instance.config != null && TelemetryManager.Instance.config.enableTelemetry)
+                {
+                    TelemetryManager.Instance.LogEvent("REPRODUCE_SUCCESS", agentId, stepIndex, new Dictionary<string, object>
+                    {
+                        ["offspringId"] = offspring.agentId,
+                        ["x"] = spawnPos.x,
+                        ["y"] = spawnPos.y,
+                        ["z"] = spawnPos.z,
+                        ["childGenome"] = childGenome
+                    });
+                }
 
                 // Register with population manager
                 if (populationManager != null)
@@ -505,11 +716,31 @@ namespace SyntheticLife.Phi.Core
             }
         }
 
-        private bool IsDead()
+        private bool IsDead(out string cause)
         {
+            cause = "unknown";
             if (creatureConfig == null) return false;
-            return energy <= creatureConfig.deathEnergyThreshold || 
-                   integrity <= creatureConfig.deathIntegrityThreshold;
+
+            if (energy <= creatureConfig.deathEnergyThreshold)
+            {
+                cause = "starvation";
+                return true;
+            }
+            if (integrity <= creatureConfig.deathIntegrityThreshold)
+            {
+                cause = "integrity";
+                return true;
+            }
+
+            // Temperature death (extreme cases)
+            float tempStress = Mathf.Abs(temperature - targetTemperature);
+            if (tempStress > 0.8f && integrity < 0.2f)
+            {
+                cause = "temperature";
+                return true;
+            }
+
+            return false;
         }
 
         public float GetIntegrity()

@@ -42,6 +42,15 @@
 - Name: "RewardConfig"
 - Use default values (already tuned)
 
+**TelemetryConfig:**
+- Create → SyntheticLife/Config/TelemetryConfig
+- Name: "TelemetryConfig"
+- Use default values (telemetry enabled by default)
+
+**OR use automated setup:**
+- Menu: SyntheticLife → Create Default Configs
+- This creates all configs with sensible defaults
+
 ### 3. Create Food Prefab
 
 1. Create → 3D Object → Cube
@@ -144,6 +153,7 @@
 2. Add Component: `PopulationManager`
 3. maxCreatures: 20
 4. Assign Creature prefab
+5. **IMPORTANT:** Assign CreatureDefaults ScriptableObject to creatureDefaults field (required for genome mutation)
 
 ### 11. Add Debug UI (Optional)
 
@@ -161,10 +171,11 @@
 
 ### 13. Final Checks
 
-- [ ] All ScriptableObjects created and assigned
+- [ ] All ScriptableObjects created and assigned (including TelemetryConfig)
 - [ ] Tags set correctly (Food, Hazard, Shelter, Creature, TemperatureZone)
 - [ ] Creature prefab has all components
-- [ ] PopulationManager has prefab assigned
+- [ ] PopulationManager has prefab AND CreatureDefaults assigned
+- [ ] TelemetryManager has TelemetryConfig assigned
 - [ ] No missing references in Console
 
 ### 14. Test Run
@@ -210,6 +221,11 @@ Then press Play in Unity.
 ### PopulationManager Component
 
 - Creature Prefab: Drag Creature prefab
+- **Creature Defaults:** Drag CreatureDefaults ScriptableObject (REQUIRED for genome mutation)
+
+### TelemetryManager Component
+
+- Config: Drag TelemetryConfig ScriptableObject
 
 ## Common Issues
 

@@ -1,0 +1,198 @@
+#if UNITY_EDITOR
+using UnityEngine;
+using UnityEditor;
+using UnityEditor.SceneManagement;
+using SyntheticLife.Phi.Config;
+using SyntheticLife.Phi.Core;
+using SyntheticLife.Phi.World;
+using SyntheticLife.Phi.Utils;
+
+namespace SyntheticLife.Phi.Editor
+{
+    public class SceneSetupHelper : EditorWindow
+    {
+        [MenuItem("SyntheticLife/Setup Training Scene")]
+        static void Init()
+        {
+            SetupTrainingScene();
+        }
+
+        static void SetupTrainingScene()
+        {
+            // Create new scene
+            var scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
+            
+            // Setup ground
+            GameObject ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
+            ground.name = "Arena";
+            ground.transform.localScale = new Vector3(5, 1, 5);
+            ground.transform.position = Vector3.zero;
+
+            // Create folder structure
+            GameObject sceneRoot = new GameObject("Environment");
+            GameObject configsRoot = new GameObject("Configs");
+            GameObject zonesRoot = new GameObject("Zones");
+
+            // Load or create configs
+            CreatureDefaults creatureConfig = AssetDatabase.LoadAssetAtPath<CreatureDefaults>("Assets/ScriptableObjects/Configs/CreatureDefaults.asset");
+            PhiFieldConfig phiConfig = AssetDatabase.LoadAssetAtPath<PhiFieldConfig>("Assets/ScriptableObjects/Configs/PhiFieldConfig.asset");
+            SpawnerConfig spawnerConfig = AssetDatabase.LoadAssetAtPath<SpawnerConfig>("Assets/ScriptableObjects/Configs/SpawnerConfig.asset");
+            RewardConfig rewardConfig = AssetDatabase.LoadAssetAtPath<RewardConfig>("Assets/ScriptableObjects/Configs/RewardConfig.asset");
+            TelemetryConfig telemetryConfig = AssetDatabase.LoadAssetAtPath<TelemetryConfig>("Assets/ScriptableObjects/Configs/TelemetryConfig.asset");
+
+            if (creatureConfig == null || phiConfig == null || spawnerConfig == null || rewardConfig == null || telemetryConfig == null)
+            {
+                Debug.LogWarning("Configs not found! Creating them now...");
+                CreateDefaultConfigs.Init();
+                creatureConfig = AssetDatabase.LoadAssetAtPath<CreatureDefaults>("Assets/ScriptableObjects/Configs/CreatureDefaults.asset");
+                phiConfig = AssetDatabase.LoadAssetAtPath<PhiFieldConfig>("Assets/ScriptableObjects/Configs/PhiFieldConfig.asset");
+                spawnerConfig = AssetDatabase.LoadAssetAtPath<SpawnerConfig>("Assets/ScriptableObjects/Configs/SpawnerConfig.asset");
+                rewardConfig = AssetDatabase.LoadAssetAtPath<RewardConfig>("Assets/ScriptableObjects/Configs/RewardConfig.asset");
+                telemetryConfig = AssetDatabase.LoadAssetAtPath<TelemetryConfig>("Assets/ScriptableObjects/Configs/TelemetryConfig.asset");
+            }
+
+            // PhiField
+            GameObject phiFieldObj = new GameObject("PhiField");
+            phiFieldObj.transform.parent = sceneRoot.transform;
+            PhiField phiField = phiFieldObj.AddComponent<PhiField>();
+            SerializedObject phiFieldSO = new SerializedObject(phiField);
+            phiFieldSO.FindProperty("config").objectReferenceValue = phiConfig;
+            phiFieldSO.ApplyModifiedProperties();
+
+            // Food Spawner
+            GameObject foodSpawnerObj = new GameObject("FoodSpawner");
+            foodSpawnerObj.transform.parent = sceneRoot.transform;
+            FoodSpawner foodSpawner = foodSpawnerObj.AddComponent<FoodSpawner>();
+            SerializedObject foodSpawnerSO = new SerializedObject(foodSpawner);
+            foodSpawnerSO.FindProperty("config").objectReferenceValue = spawnerConfig;
+            foodSpawnerSO.FindProperty("phiField").objectReferenceValue = phiField;
+            foodSpawnerSO.ApplyModifiedProperties();
+
+            // Create food prefab if needed
+            GameObject foodPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Food.prefab");
+            if (foodPrefab == null)
+            {
+                GameObject food = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                food.name = "Food";
+                food.transform.localScale = new Vector3(0.5f, 0.5f, 0.5f);
+                food.AddComponent<FoodItem>();
+                food.tag = "Food";
+                
+                // Create Prefabs folder
+                if (!AssetDatabase.IsValidFolder("Assets/Prefabs"))
+                {
+                    AssetDatabase.CreateFolder("Assets", "Prefabs");
+                }
+                
+                string prefabPath = "Assets/Prefabs/Food.prefab";
+                foodPrefab = PrefabUtility.SaveAsPrefabAsset(food, prefabPath);
+                DestroyImmediate(food);
+            }
+            foodSpawnerSO.FindProperty("config").objectReferenceValue = spawnerConfig;
+            SerializedObject spawnerConfigSO = new SerializedObject(spawnerConfig);
+            spawnerConfigSO.FindProperty("foodPrefab").objectReferenceValue = foodPrefab;
+            spawnerConfigSO.ApplyModifiedProperties();
+
+            // Temperature Zones
+            GameObject hotZone = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            hotZone.name = "HotZone";
+            hotZone.transform.position = new Vector3(15, 0.5f, 0);
+            hotZone.transform.localScale = new Vector3(10, 1, 10);
+            hotZone.transform.parent = zonesRoot.transform;
+            hotZone.tag = "TemperatureZone";
+            TemperatureZone hotZoneComp = hotZone.AddComponent<TemperatureZone>();
+            hotZoneComp.temperatureValue = 0.8f;
+            var hotRenderer = hotZone.GetComponent<Renderer>();
+            hotRenderer.material.color = new Color(1f, 0.3f, 0.3f, 0.5f);
+
+            GameObject coldZone = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            coldZone.name = "ColdZone";
+            coldZone.transform.position = new Vector3(-15, 0.5f, 0);
+            coldZone.transform.localScale = new Vector3(10, 1, 10);
+            coldZone.transform.parent = zonesRoot.transform;
+            coldZone.tag = "TemperatureZone";
+            TemperatureZone coldZoneComp = coldZone.AddComponent<TemperatureZone>();
+            coldZoneComp.temperatureValue = 0.2f;
+            var coldRenderer = coldZone.GetComponent<Renderer>();
+            coldRenderer.material.color = new Color(0.3f, 0.3f, 1f, 0.5f);
+
+            // Hazard
+            GameObject hazard = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            hazard.name = "Hazard1";
+            hazard.transform.position = new Vector3(10, 0.5f, 10);
+            hazard.transform.localScale = new Vector3(5, 1, 5);
+            hazard.transform.parent = zonesRoot.transform;
+            hazard.tag = "Hazard";
+            hazard.AddComponent<HazardZone>();
+            var hazardRenderer = hazard.GetComponent<Renderer>();
+            hazardRenderer.material.color = new Color(1f, 0f, 0f, 0.5f);
+
+            // Shelter
+            GameObject shelter = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            shelter.name = "Shelter";
+            shelter.transform.position = new Vector3(0, 1, 0);
+            shelter.transform.localScale = new Vector3(8, 2, 8);
+            shelter.transform.parent = zonesRoot.transform;
+            shelter.tag = "Shelter";
+            shelter.AddComponent<ShelterZone>();
+            var shelterRenderer = shelter.GetComponent<Renderer>();
+            shelterRenderer.material.color = new Color(0f, 1f, 0f, 0.5f);
+
+            // Telemetry Manager
+            GameObject telemetryManagerObj = new GameObject("TelemetryManager");
+            TelemetryManager telemetryManager = telemetryManagerObj.AddComponent<TelemetryManager>();
+            SerializedObject telemetryManagerSO = new SerializedObject(telemetryManager);
+            telemetryManagerSO.FindProperty("config").objectReferenceValue = telemetryConfig;
+            telemetryManagerSO.ApplyModifiedProperties();
+
+            // Population Manager
+            GameObject popManager = new GameObject("PopulationManager");
+            PopulationManager pm = popManager.AddComponent<PopulationManager>();
+            pm.maxCreatures = 20;
+            SerializedObject pmSO = new SerializedObject(pm);
+            pmSO.FindProperty("creatureDefaults").objectReferenceValue = creatureConfig;
+            pmSO.ApplyModifiedProperties();
+
+            // Create creature prefab if needed
+            GameObject creaturePrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Creature.prefab");
+            if (creaturePrefab == null)
+            {
+                Debug.LogWarning("Creature prefab not found. Please create it manually following SETUP_GUIDE.md");
+            }
+            else
+            {
+                SerializedObject pmPrefabSO = new SerializedObject(pm);
+                pmPrefabSO.FindProperty("creaturePrefab").objectReferenceValue = creaturePrefab;
+                pmPrefabSO.ApplyModifiedProperties();
+            }
+
+            // Add initial creature
+            if (creaturePrefab != null)
+            {
+                GameObject creature = PrefabUtility.InstantiatePrefab(creaturePrefab) as GameObject;
+                creature.transform.position = new Vector3(0, 1, 0);
+            }
+
+            // Save scene
+            if (!AssetDatabase.IsValidFolder("Assets/Scenes"))
+            {
+                AssetDatabase.CreateFolder("Assets", "Scenes");
+            }
+            EditorSceneManager.SaveScene(scene, "Assets/Scenes/TrainingArena.unity");
+
+            Debug.Log("Scene setup complete! TelemetryManager and PopulationManager configured.");
+            EditorUtility.DisplayDialog("Scene Setup", 
+                "Training scene created!\n\n" +
+                "✅ TelemetryManager added and configured\n" +
+                "✅ PopulationManager configured with CreatureDefaults\n\n" +
+                "IMPORTANT: You still need to:\n" +
+                "1. Create Creature prefab with all components\n" +
+                "2. Assign configs to CreatureAgent (creatureConfig, rewardConfig, phiConfig)\n" +
+                "3. Configure Behavior Parameters\n" +
+                "4. Set up Ray Perception Sensor\n\n" +
+                "See SETUP_GUIDE.md for details.", "OK");
+        }
+    }
+}
+#endif
+

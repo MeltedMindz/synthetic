@@ -1,4 +1,5 @@
 using UnityEngine;
+using SyntheticLife.Phi.Core;
 
 namespace SyntheticLife.Phi.Config
 {
@@ -11,6 +12,15 @@ namespace SyntheticLife.Phi.Config
         public float initialIntegrity = 1f;
         public float initialAge = 0f;
         public Genome defaultGenome;
+
+        [Header("Genome Ranges")]
+        public GenomeRanges genomeRanges = GenomeRanges.Default();
+
+        [Header("Life History Mapping")]
+        public float maturityAgeMin = 20f;
+        public float maturityAgeMax = 40f;
+        public float maxAgeMin = 50f;
+        public float maxAgeMax = 100f;
 
         [Header("Life Stages (seconds)")]
         public float juvenileAge = 10f;

@@ -1,7 +1,10 @@
 using UnityEngine;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Unity.MLAgents;
+using SyntheticLife.Phi.Config;
+using SyntheticLife.Phi.Utils;
 
 namespace SyntheticLife.Phi.Core
 {
@@ -10,9 +13,11 @@ namespace SyntheticLife.Phi.Core
         [Header("Population Settings")]
         public int maxCreatures = 20;
         public GameObject creaturePrefab;
+        public CreatureDefaults creatureDefaults;
 
         private List<CreatureAgent> allCreatures = new List<CreatureAgent>();
         private Dictionary<CreatureAgent, float> creatureSpawnTimes = new Dictionary<CreatureAgent, float>();
+        private int birthCounter = 0;
 
         private void Start()
         {
@@ -93,6 +98,45 @@ namespace SyntheticLife.Phi.Core
         {
             allCreatures.RemoveAll(c => c == null);
             return allCreatures.Count;
+        }
+
+        public Genome MutateGenome(Genome parentGenome, int parentId)
+        {
+            if (creatureDefaults == null) return parentGenome;
+
+            // Get run RNG from TelemetryManager
+            System.Random rng = null;
+            if (TelemetryManager.Instance != null)
+            {
+                rng = TelemetryManager.Instance.GetRunRNG();
+            }
+
+            if (rng == null)
+            {
+                rng = new System.Random(Environment.TickCount);
+            }
+
+            // Deterministic seed: runSeed XOR parentIdHash XOR birthIndex
+            int birthIndex = GetNextBirthIndex();
+            int parentIdHash = parentId.GetHashCode();
+            int runSeed = rng.Next();
+            int mutationSeed = runSeed ^ parentIdHash ^ birthIndex;
+            System.Random mutationRNG = new System.Random(mutationSeed);
+
+            Genome childGenome = Genome.Mutate(
+                mutationRNG,
+                parentGenome,
+                creatureDefaults.genomeRanges,
+                creatureDefaults.mutationRate,
+                creatureDefaults.mutationStrength
+            );
+
+            return childGenome.Clamp(creatureDefaults.genomeRanges);
+        }
+
+        private int GetNextBirthIndex()
+        {
+            return birthCounter++;
         }
 
         private void Update()

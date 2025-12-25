@@ -3,13 +3,14 @@ using UnityEngine;
 using UnityEditor;
 using SyntheticLife.Phi.Config;
 using SyntheticLife.Phi.Core;
+using SyntheticLife.Phi.Utils;
 
 namespace SyntheticLife.Phi.Editor
 {
-    public class CreateDefaultConfigs : EditorWindow
+    public static class CreateDefaultConfigs
     {
         [MenuItem("SyntheticLife/Create Default Configs")]
-        static void Init()
+        public static void Init()
         {
             CreateConfigs();
         }
@@ -108,6 +109,22 @@ namespace SyntheticLife.Phi.Editor
             rewardConfig.explorationReward = 0.001f;
             rewardConfig.explorationGridSize = 2f;
             AssetDatabase.CreateAsset(rewardConfig, $"{configPath}/RewardConfig.asset");
+
+            // TelemetryConfig
+            TelemetryConfig telemetryConfig = ScriptableObject.CreateInstance<TelemetryConfig>();
+            telemetryConfig.enableTelemetry = true;
+            telemetryConfig.logToFile = true;
+            telemetryConfig.logEpisodes = true;
+            telemetryConfig.logEvents = true;
+            telemetryConfig.eventsBufferSize = 100;
+            telemetryConfig.logTrajectories = true;
+            telemetryConfig.trajectorySampleInterval = 10;
+            telemetryConfig.logWorldSnapshots = true;
+            telemetryConfig.worldSnapshotInterval = 30f;
+            telemetryConfig.phiGridResolution = 64;
+            telemetryConfig.logReplayData = true;
+            telemetryConfig.generateAutoReport = true;
+            AssetDatabase.CreateAsset(telemetryConfig, $"{configPath}/TelemetryConfig.asset");
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
